@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "ask": [
+      "Bash(*BWS_AGENT_RW*)",
+      "Bash(*bws-add *)",
+      "Bash(*bws-rot *)",
+      "Bash(*bws-rm *)",
+      "Bash(*bws secret create*)",
+      "Bash(*bws secret edit*)",
+      "Bash(*bws secret delete*)",
+      "Bash(*security find-generic-password*)",
+      "Bash(*secret-tool lookup*)",
+      "Bash(*bws-admin*)"
+    ],
+    "deny": [
+      "Read(~/.config/bws/**)"
+    ]
+  }
+}

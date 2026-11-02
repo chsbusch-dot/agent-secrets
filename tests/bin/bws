@@ -1,0 +1,144 @@
+#!/usr/bin/env python3
+"""Mock of the Bitwarden Secrets Manager CLI (bws 2.x) for the smoke test.
+
+State lives in the JSON file at $MOCK_BWS_STORE: projects, tokens (each with a
+kind, "admin" or "ro", and the projects it can see) and secrets. Every call
+appends one line to $MOCK_BWS_LOG, "<token kind> <command> [key name]", never a
+value. While the integer in $MOCK_BWS_FAIL_FILE is above zero, a call counts it
+down and fails the way a rate-limited API call does.
+"""
+import json
+import os
+import sys
+import uuid
+
+
+def die(msg):
+    sys.stderr.write("Error: %s\n" % msg)
+    sys.exit(1)
+
+
+def take_option(args, *names):
+    """Removes --name VALUE from args and returns VALUE (or None)."""
+    for i, a in enumerate(args):
+        if a in names and i + 1 < len(args):
+            value = args[i + 1]
+            del args[i:i + 2]
+            return value
+    return None
+
+
+def main(argv):
+    fail_file = os.environ.get("MOCK_BWS_FAIL_FILE")
+    if fail_file and os.path.exists(fail_file):
+        with open(fail_file) as f:
+            left = int(f.read().strip() or 0)
+        if left > 0:
+            with open(fail_file, "w") as f:
+                f.write(str(left - 1))
+            die("429 Too Many Requests")
+
+    store_file = os.environ["MOCK_BWS_STORE"]
+    with open(store_file) as f:
+        store = json.load(f)
+    token = store["tokens"].get(os.environ.get("BWS_ACCESS_TOKEN", ""))
+    if token is None:
+        die("401 Unauthorized")
+    kind = token["kind"]
+    visible = token["projects"]
+
+    def log(line):
+        path_ = os.environ.get("MOCK_BWS_LOG")
+        if path_:
+            with open(path_, "a") as f:
+                f.write("%s %s\n" % (kind, line))
+
+    def save():
+        with open(store_file, "w") as f:
+            json.dump(store, f)
+
+    def need_write():
+        if kind != "admin":
+            die("403 Forbidden")
+
+    def find(secret_id):
+        for s in store["secrets"]:
+            if s["id"] == secret_id and s["projectId"] in visible:
+                return s
+        die("404 Not Found")
+
+    def full(s):
+        out = {"creationDate": "2000-01-01T00:00:00Z", "organizationId": "org-test",
+               "revisionDate": "2000-01-01T00:00:00Z"}
+        out.update(s)
+        return out
+
+    if argv[:1] == ["run"]:
+        cut = argv.index("--") if "--" in argv else len(argv)
+        opts, cmd = argv[1:cut], argv[cut + 1:]
+        project = take_option(opts, "--project-id")
+        log("run")
+        if not cmd:
+            die("no command")
+        env = dict(os.environ)
+        for s in store["secrets"]:
+            if s["projectId"] in visible and (project is None or s["projectId"] == project):
+                env[s["key"]] = s["value"]
+        os.execvpe(cmd[0], cmd, env)
+
+    args = list(argv)
+    fmt = take_option(args, "-o", "--output") or "json"
+    note = take_option(args, "--note")
+    value = take_option(args, "--value")
+
+    def emit(obj):
+        if fmt != "none":
+            print(json.dumps(obj, indent=2))
+
+    head = " ".join(args[:2])
+    if head == "project list":
+        log("project list")
+        emit([p for p in store["projects"] if p["id"] in visible])
+    elif head == "secret list":
+        log("secret list")
+        project = args[2] if len(args) > 2 else None
+        emit([full(s) for s in store["secrets"]
+              if s["projectId"] in visible and (project is None or s["projectId"] == project)])
+    elif head == "secret get":
+        s = find(args[2])
+        log("secret get %s" % s["key"])
+        emit(full(s))
+    elif head == "secret create":
+        key, val, project = args[2], args[3], args[4]
+        log("secret create %s" % key)
+        need_write()
+        if project not in visible:
+            die("404 Not Found")
+        s = {"id": "s-" + uuid.uuid4().hex[:8], "key": key, "value": val,
+             "projectId": project, "note": note or ""}
+        store["secrets"].append(s)
+        save()
+        emit(full(s))
+    elif head == "secret edit":
+        s = find(args[2])
+        log("secret edit %s" % s["key"])
+        need_write()
+        if value is not None:
+            s["value"] = value
+        if note is not None:
+            s["note"] = note
+        save()
+        emit(full(s))
+    elif head == "secret delete":
+        for secret_id in args[2:]:
+            s = find(secret_id)
+            log("secret delete %s" % s["key"])
+            need_write()
+            store["secrets"].remove(s)
+        save()
+    else:
+        die("mock bws does not know: %s" % head)
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

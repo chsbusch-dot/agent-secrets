@@ -1,0 +1,18 @@
+#!/bin/bash
+# Mock of macOS `security find-generic-password -s ITEM -w` for the smoke test.
+# The "keychain" is a directory, $MOCK_KEYCHAIN_DIR, with one file per item.
+# Each read is logged to $MOCK_BWS_LOG as "keychain read ITEM".
+item=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -s) item="${2:-}"; shift ;;
+  esac
+  shift
+done
+printf 'keychain read %s\n' "$item" >>"${MOCK_BWS_LOG:-/dev/null}"
+f="${MOCK_KEYCHAIN_DIR:-/nonexistent}/$item"
+if [ -z "$item" ] || [ ! -r "$f" ]; then
+  echo "security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain." >&2
+  exit 44
+fi
+cat "$f"

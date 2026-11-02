@@ -1,0 +1,41 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: shellcheck
+        run: shellcheck -s bash bws-helpers.sh tests/smoke.sh tests/bin/security scripts/scrub-check.sh scripts/dash-check.sh
+      - name: no em or en dashes
+        run: scripts/dash-check.sh
+
+  smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, shell: bash }
+          - { os: ubuntu-latest, shell: zsh }
+          - { os: macos-latest, shell: /bin/bash }
+          - { os: macos-latest, shell: /bin/zsh }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: install zsh
+        if: runner.os == 'Linux' && matrix.shell == 'zsh'
+        run: sudo apt-get update -q && sudo apt-get install -yq zsh
+      - name: smoke test (${{ matrix.shell }})
+        run: tests/smoke.sh "${{ matrix.shell }}"
