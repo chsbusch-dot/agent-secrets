@@ -535,4 +535,4 @@ pattern with no control hit fails too. Keep the patterns file outside the repo.
 
 ## License
 
-No license yet. Until a `LICENSE` file lands, all rights are reserved.
+MIT. See [`LICENSE`](LICENSE).
